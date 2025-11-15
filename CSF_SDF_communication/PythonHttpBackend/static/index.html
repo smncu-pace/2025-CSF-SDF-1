@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python HTTP后端服务器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .header {
+            background: #f4f4f4;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .endpoint {
+            background: #f9f9f9;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #007cba;
+        }
+        code {
+            background: #eee;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Python HTTP后端服务器</h1>
+        <p>为Qt前端应用提供RESTful API服务</p>
+        <p><strong>状态:</strong> <span id="status">检查中...</span></p>
+    </div>
+
+    <h2>API端点</h2>
+    
+    <div class="endpoint">
+        <h3>GET /api/hello</h3>
+        <p>欢迎消息接口</p>
+        <p><strong>参数:</strong> <code>name</code> (可选) - 用户名</p>
+        <button onclick="testHello()">测试</button>
+    </div>
+
+    <div class="endpoint">
+        <h3>GET /api/messages</h3>
+        <p>获取消息列表</p>
+        <p><strong>参数:</strong> <code>limit</code> (可选) - 限制返回数量</p>
+        <button onclick="getMessages()">测试</button>
+    </div>
+
+    <div class="endpoint">
+        <h3>POST /api/calculate</h3>
+        <p>数学计算</p>
+        <p><strong>参数:</strong> <code>expression</code> - 数学表达式</p>
+        <input type="text" id="expression" value="2+3*4" placeholder="输入数学表达式">
+        <button onclick="calculate()">计算</button>
+    </div>
+
+    <div id="result"></div>
+
+    <script>
+        const baseUrl = window.location.origin;
+        
+        // 检查服务器状态
+        fetch(`${baseUrl}/health`)
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('status').textContent = '运行正常';
+                document.getElementById('status').style.color = 'green';
+            })
+            .catch(error => {
+                document.getElementById('status').textContent = '连接失败';
+                document.getElementById('status').style.color = 'red';
+            });
+
+        function testHello() {
+            fetch(`${baseUrl}/api/hello?name=Web用户`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('result').innerHTML = 
+                        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                });
+        }
+
+        function getMessages() {
+            fetch(`${baseUrl}/api/messages?limit=5`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('result').innerHTML = 
+                        `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                });
+        }
+
+        function calculate() {
+            const expression = document.getElementById('expression').value;
+            fetch(`${baseUrl}/api/calculate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ expression: expression })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('result').innerHTML = 
+                    `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            });
+        }
+    </script>
+</body>
+</html>
