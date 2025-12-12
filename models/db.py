@@ -1,4 +1,4 @@
-
+import psycopg2
 from psycopg2.extras import RealDictCursor
 from config import Config
 
@@ -8,4 +8,3 @@ def get_db_connection():
         cursor_factory=RealDictCursor
     )
     return conn
-
