@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from flask import current_app
 import psycopg2
 from psycopg2.extras import RealDictCursor

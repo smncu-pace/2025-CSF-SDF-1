@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # routes/memory_routes.py
 
 """
@@ -18,11 +19,14 @@
 """
 
 from __future__ import annotations
-import models.db
+import base64
+import mimetypes
+import os
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any
 
-from flask import Blueprint, request, jsonify
+import models.db
+from flask import Blueprint, request, jsonify, current_app
 from utils.helpers import paginate_sorted
 from db import get_db_connection  # 在需要的地方再导入
 
@@ -59,6 +63,65 @@ def _fetch_visible_user_ids(memory_id: int, conn) -> List[int]:
     return [r["user_id"] for r in rows]
 
 
+def _fetch_avatar_base64(user_id: int, conn) -> str | None:
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT image_base64 FROM avatars WHERE user_id = %s",
+        (user_id,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    return row["image_base64"] if row else None
+
+
+def _load_avatar_file_base64(filename: str | None) -> str | None:
+    """Read an avatar file under app root and return base64 string; returns None on failure."""
+    if not filename:
+        return None
+    abs_path = filename
+    if not os.path.isabs(filename):
+        abs_path = os.path.join(current_app.root_path, filename)
+
+    try:
+        with open(abs_path, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _to_base64_or_original(pict_path: str | None) -> str | None:
+    """
+    将图片路径转换为 base64 data URI；读取失败时保留原始路径，避免前端直接崩溃。
+    """
+    if not pict_path:
+        return None
+
+    stripped = pict_path.strip()
+    # 已经是 data URI 或纯 base64 时直接返回
+    if stripped.startswith("data:"):
+        return stripped
+
+    try:
+        abs_path = pict_path
+        if not os.path.isabs(pict_path):
+            abs_path = os.path.join(current_app.root_path, pict_path.lstrip("/"))
+
+        with open(abs_path, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        return pict_path
+    except Exception:
+        return pict_path
+
+    mime, _ = mimetypes.guess_type(abs_path)
+    b64 = base64.b64encode(raw).decode("ascii")
+    return f"data:{mime};base64,{b64}" if mime else b64
+
+
 def _fetch_cover_picture(memory_id: int, conn) -> str | None:
     cur = conn.cursor()
     cur.execute(
@@ -67,7 +130,7 @@ def _fetch_cover_picture(memory_id: int, conn) -> str | None:
     )
     row = cur.fetchone()
     cur.close()
-    return row["pict"] if row else None
+    return _to_base64_or_original(row["pict"]) if row else None
 
 
 def _serialize_message(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -118,6 +181,15 @@ def _serialize_memory(row: Dict[str, Any], conn) -> Dict[str, Any]:
     }
 
 
+def _serialize_picture(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "picture_id": row["id"],
+        "memory_id": row["memory_id"],
+        "title": row.get("title"),
+        "image_base64": _to_base64_or_original(row.get("pict")),
+    }
+
+
 def _serialize_comment(row: Dict[str, Any], conn) -> Dict[str, Any]:
     comment_id = row["id"]
     # 取关联的图片
@@ -146,7 +218,7 @@ def _serialize_user(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "user_id": row["id"],
         "name": row.get("name"),
-        "avatar": row.get("avatar"),
+        "avatar": row.get("avatar_base64"),
     }
 
 
@@ -168,10 +240,26 @@ def validate_login():
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT id, name, avatar, password FROM users WHERE name = %s",
-            (name,),
-        )
+        try:
+            cur.execute(
+                """
+                SELECT u.id, u.name, u.password, a.image_base64 AS avatar_base64
+                FROM users u
+                LEFT JOIN avatars a ON a.user_id = u.id
+                WHERE u.name = %s
+                """,
+                (name,),
+            )
+        except Exception:
+            # 兼容老库：没有 avatars 表时退回 users.avatar
+            cur.execute(
+                """
+                SELECT id, name, password, avatar AS avatar_base64
+                FROM users
+                WHERE name = %s
+                """,
+                (name,),
+            )
         row = cur.fetchone()
         cur.close()
     finally:
@@ -185,7 +273,7 @@ def validate_login():
         "user": {
             "user_id": row["id"],
             "name": row["name"],
-            "avatar": row["avatar"],
+            "avatar": row.get("avatar_base64"),
         }
     })
 
@@ -198,10 +286,26 @@ def get_user_profile(user_id: int):
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT id, name, avatar FROM users WHERE id = %s",
-            (user_id,),
-        )
+        try:
+            cur.execute(
+                """
+                SELECT u.id, u.name, a.image_base64 AS avatar_base64
+                FROM users u
+                LEFT JOIN avatars a ON a.user_id = u.id
+                WHERE u.id = %s
+                """,
+                (user_id,),
+            )
+        except Exception:
+            # 兼容老库：没有 avatars 表时退回 users.avatar
+            cur.execute(
+                """
+                SELECT id, name, avatar AS avatar_base64
+                FROM users
+                WHERE id = %s
+                """,
+                (user_id,),
+            )
         row = cur.fetchone()
         cur.close()
     finally:
@@ -213,7 +317,7 @@ def get_user_profile(user_id: int):
     return jsonify({
         "user_id": row["id"],
         "name": row["name"],
-        "avatar": row["avatar"],
+        "avatar": row.get("avatar_base64"),
     })
 
 
@@ -337,6 +441,56 @@ def preview_memory(memory_id: int):
             return jsonify({"error": "回忆不存在"}), 404
 
         return jsonify(_serialize_memory(row, conn))
+    finally:
+        conn.close()
+
+
+@memory_bp.route("/memory/<int:memory_id>/pictures", methods=["GET"])
+def get_memory_pictures(memory_id: int):
+    """
+    请求：获取回忆的所有图片（base64）。
+    返回：包含 image_base64 的图片列表。
+    """
+    conn = get_db_connection()
+    try:
+        if not _memory_exists(memory_id, conn):
+            return jsonify({"error": "回忆不存在"}), 404
+
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, memory_id, pict, title
+            FROM pictures
+            WHERE memory_id = %s
+            ORDER BY id ASC
+            """,
+            (memory_id,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return jsonify([_serialize_picture(r) for r in rows])
+    finally:
+        conn.close()
+
+
+@memory_bp.route("/pictures/<int:picture_id>", methods=["GET"])
+def get_picture_by_id(picture_id: int):
+    """
+    请求：通过图片 id 获取图片（base64）。
+    """
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, memory_id, pict, title FROM pictures WHERE id = %s",
+            (picture_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return jsonify({"error": "图片不存在"}), 404
+
+        return jsonify(_serialize_picture(row))
     finally:
         conn.close()
 
@@ -765,16 +919,30 @@ def get_persons(user_id: int):
             return jsonify({"error": "用户不存在"}), 404
 
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, name, avatar
-            FROM users
-            WHERE id != %s
-            ORDER BY id ASC
-            LIMIT %s OFFSET %s
-            """,
-            (user_id, limit, offset),
-        )
+        try:
+            cur.execute(
+                """
+                SELECT u.id, u.name, a.image_base64 AS avatar_base64
+                FROM users u
+                LEFT JOIN avatars a ON a.user_id = u.id
+                WHERE u.id != %s
+                ORDER BY u.id ASC
+                LIMIT %s OFFSET %s
+                """,
+                (user_id, limit, offset),
+            )
+        except Exception:
+            # 兼容老库：没有 avatars 表时退回 users.avatar
+            cur.execute(
+                """
+                SELECT id, name, avatar AS avatar_base64
+                FROM users
+                WHERE id != %s
+                ORDER BY id ASC
+                LIMIT %s OFFSET %s
+                """,
+                (user_id, limit, offset),
+            )
         rows = cur.fetchall()
         cur.close()
         return jsonify([_serialize_user(r) for r in rows])
@@ -978,22 +1146,45 @@ def init_demo_data():
 
         # 1. 创建用户
         users_info = [
-            ("Alice", "/avatar/alice.png", "alice123"),
-            ("Bob", "/avatar/bob.png", "bob123"),
-            ("Carol", "/avatar/carol.png", "carol123"),
+            ("Alice", "alice123"),
+            ("Bob", "bob123"),
+            ("Carol", "carol123"),
         ]
         user_ids = {}
-        for name, avatar, pwd in users_info:
+        for name, pwd in users_info:
             cur.execute(
                 """
-                INSERT INTO users (name, avatar, password)
-                VALUES (%s, %s, %s)
+                INSERT INTO users (name, password)
+                VALUES (%s, %s)
                 RETURNING id
                 """,
-                (name, avatar, pwd),
+                (name, pwd),
             )
             uid = cur.fetchone()["id"]
             user_ids[name] = uid
+
+        # 1.1 add base64 avatars for demo users；如果没有 avatars 表则跳过
+        try:
+            avatar_files = {
+                "Alice": "mowan.png",
+                "Bob": "modi.jpg",
+                "Carol": "mowan.png",
+            }
+            for name, filename in avatar_files.items():
+                avatar_b64 = _load_avatar_file_base64(filename)
+                if avatar_b64:
+                    cur.execute(
+                        """
+                        INSERT INTO avatars (user_id, filename, image_base64)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (user_id) DO UPDATE
+                        SET filename = EXCLUDED.filename,
+                            image_base64 = EXCLUDED.image_base64
+                        """,
+                        (user_ids[name], filename, avatar_b64),
+                    )
+        except Exception:
+            pass
 
         # 2. 创建两条回忆
         today = datetime.now().date()
