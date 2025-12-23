@@ -1,6 +1,7 @@
 # services_user.py
 from typing import Optional
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 from models import User, db
 
 
@@ -115,6 +116,8 @@ def update_user_profile(
     db.session.commit()
     return user
 =======
+=======
+>>>>>>> Stashed changes
 from db import get_conn
 from models import User, Message
 import bcrypt
@@ -198,4 +201,7 @@ def check_password(name: str, password: str) -> bool:
             return False
         stored_hash = row[0].encode("utf-8")
     return bcrypt.checkpw(password.encode("utf-8"), stored_hash)
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
