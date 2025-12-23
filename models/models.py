@@ -52,8 +52,13 @@ class User(db.Model):
 
 class Memory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(120))
-    text = db.Column(db.Text)
+    title = db.Column(db.String(120))    
+    start_time = db.Column(db.DateTime)
+    end_time = db.Column(db.DateTime)
+    location = db.Column(db.String(255))
+    cover_url = db.Column(db.String(255))
+    creator_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    description = db.Column(db.Text)
 
     pictures = db.relationship(
         "Picture",
