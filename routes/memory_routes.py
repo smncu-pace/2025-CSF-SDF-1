@@ -19,26 +19,6 @@
 """
 
 from __future__ import annotations
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Any
-
-from flask import Blueprint, request, jsonify
-from sqlalchemy import or_
-
-from models import (
-    db,
-    User,
-    Memory,
-    Picture,
-    Comment,
-    Message,
-    UserMemory,
-    UserMessage,
-    DebugPing,
-)
-=======
 import base64
 import mimetypes
 import os
@@ -47,18 +27,8 @@ from typing import List, Dict, Any
 
 import models.db
 from flask import Blueprint, request, jsonify, current_app
->>>>>>> Stashed changes
-=======
-import base64
-import mimetypes
-import os
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Any
-
-import models.db
-from flask import Blueprint, request, jsonify, current_app
->>>>>>> Stashed changes
 from utils.helpers import paginate_sorted
+from db import get_db_connection  # 在需要的地方再导入
 
 
 memory_bp = Blueprint("memory", __name__)
@@ -66,89 +36,31 @@ memory_bp = Blueprint("memory", __name__)
 
 # ------------ 小工具函数 ------------
 
-def _user_exists(user_id: int) -> bool:
-    return User.query.get(user_id) is not None
+def _user_exists(user_id: int, conn) -> bool:
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM users WHERE id = %s", (user_id,))
+    exists = cur.fetchone() is not None
+    cur.close()
+    return exists
 
 
-def _memory_exists(memory_id: int) -> bool:
-    return Memory.query.get(memory_id) is not None
+def _memory_exists(memory_id: int, conn) -> bool:
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM memories WHERE id = %s", (memory_id,))
+    exists = cur.fetchone() is not None
+    cur.close()
+    return exists
 
 
-def _fetch_visible_user_ids(memory_id: int) -> List[int]:
-    rows = (
-        db.session.query(UserMemory.user_id)
-        .filter(UserMemory.memory_id == memory_id)
-        .all()
-    )
-    return [r[0] for r in rows]
-
-
-<<<<<<< Updated upstream
-def _fetch_cover_picture(memory_id: int) -> str | None:
-    pic = (
-        Picture.query.filter_by(memory_id=memory_id)
-        .order_by(Picture.id.asc())
-        .first()
-    )
-    return pic.pict if pic else None
-=======
-def _fetch_avatar_base64(user_id: int, conn) -> str | None:
+def _fetch_visible_user_ids(memory_id: int, conn) -> List[int]:
     cur = conn.cursor()
     cur.execute(
-        "SELECT image_base64 FROM avatars WHERE user_id = %s",
-        (user_id,),
+        "SELECT user_id FROM memory_visible_users WHERE memory_id = %s",
+        (memory_id,),
     )
-    row = cur.fetchone()
+    rows = cur.fetchall()
     cur.close()
-    return row["image_base64"] if row else None
-
-
-def _load_avatar_file_base64(filename: str | None) -> str | None:
-    """Read an avatar file under app root and return base64 string; returns None on failure."""
-    if not filename:
-        return None
-    abs_path = filename
-    if not os.path.isabs(filename):
-        abs_path = os.path.join(current_app.root_path, filename)
-
-    try:
-        with open(abs_path, "rb") as f:
-            raw = f.read()
-    except FileNotFoundError:
-        return None
-    except Exception:
-        return None
-
-    return base64.b64encode(raw).decode("ascii")
-
-
-def _to_base64_or_original(pict_path: str | None) -> str | None:
-    """
-    将图片路径转换为 base64 data URI；读取失败时保留原始路径，避免前端直接崩溃。
-    """
-    if not pict_path:
-        return None
-
-    stripped = pict_path.strip()
-    # 已经是 data URI 或纯 base64 时直接返回
-    if stripped.startswith("data:"):
-        return stripped
-
-    try:
-        abs_path = pict_path
-        if not os.path.isabs(pict_path):
-            abs_path = os.path.join(current_app.root_path, pict_path.lstrip("/"))
-
-        with open(abs_path, "rb") as f:
-            raw = f.read()
-    except FileNotFoundError:
-        return pict_path
-    except Exception:
-        return pict_path
-
-    mime, _ = mimetypes.guess_type(abs_path)
-    b64 = base64.b64encode(raw).decode("ascii")
-    return f"data:{mime};base64,{b64}" if mime else b64
+    return [r["user_id"] for r in rows]
 
 
 def _fetch_avatar_base64(user_id: int, conn) -> str | None:
@@ -219,69 +131,56 @@ def _fetch_cover_picture(memory_id: int, conn) -> str | None:
     row = cur.fetchone()
     cur.close()
     return _to_base64_or_original(row["pict"]) if row else None
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
 
 
-def _serialize_message(message: Message, receiver_id: int, is_read: bool) -> Dict[str, Any]:
+def _serialize_message(row: Dict[str, Any]) -> Dict[str, Any]:
     links: Dict[str, int] = {}
-    if message.memory_id is not None:
-        links["memory_id"] = message.memory_id
-    if message.picture_id is not None:
-        links["picture_id"] = message.picture_id
-    if message.comment_id is not None:
-        links["comment_id"] = message.comment_id
+    if row.get("memory_id") is not None:
+        links["memory_id"] = row["memory_id"]
+    if row.get("picture_id") is not None:
+        links["picture_id"] = row["picture_id"]
+    if row.get("comment_id") is not None:
+        links["comment_id"] = row["comment_id"]
 
-    created = message.created_at
+    created = row.get("created_at")
     return {
-        "id": message.id,
-        "sender_id": message.sender_id,
-        "receiver_id": receiver_id,
-        "text": message.text,
+        "id": row["id"],
+        "sender_id": row["sender_id"],
+        "receiver_id": row["receiver_id"],
+        "text": row["text"],
         "time": created.isoformat() if isinstance(created, datetime) else None,
-        "read": is_read,
-        "system": message.system,
+        "read": row["read"],
+        "system": row["system"],
         "links": links,
     }
 
 
-def _serialize_memory(memory: Memory) -> Dict[str, Any]:
-    mem_id = memory.id
-    visible_user_ids = _fetch_visible_user_ids(mem_id)
-    cover = _fetch_cover_picture(mem_id)
-    created = memory.created_at
+def _serialize_memory(row: Dict[str, Any], conn) -> Dict[str, Any]:
+    mem_id = row["id"]
+    visible_user_ids = _fetch_visible_user_ids(mem_id, conn)
+    cover = _fetch_cover_picture(mem_id, conn)
+    created = row.get("created_at")
     created_date = created.date() if isinstance(created, datetime) else None
 
     preview = {
         "memory_id": mem_id,
-        "title": memory.title,
+        "title": row["title"],
         "cover_picture": cover,
         "date": created_date.isoformat() if created_date else None,
-        "location": memory.location,
+        "location": row["location"],
     }
 
     return {
         "memory_id": mem_id,
-        "title": memory.title,
+        "title": row["title"],
         "visible_user_ids": visible_user_ids,
-        "location": memory.location,
-        "creator_id": memory.creator_id,
+        "location": row["location"],
+        "creator_id": row["creator_id"],
         "created_at": created.isoformat() if isinstance(created, datetime) else None,
         "preview": preview,
     }
 
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-def _serialize_comment(comment: Comment) -> Dict[str, Any]:
-    comment_id = comment.id
-    pics = [p.id for p in comment.pictures]
-    created = comment.created_at
-=======
-=======
->>>>>>> Stashed changes
 def _serialize_picture(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "picture_id": row["id"],
@@ -303,12 +202,11 @@ def _serialize_comment(row: Dict[str, Any], conn) -> Dict[str, Any]:
     cur.close()
 
     created = row.get("created_at")
->>>>>>> Stashed changes
     return {
         "comment_id": comment_id,
-        "commenter_id": comment.commenter_id,
-        "target_id": comment.target_id,
-        "comment": comment.content,
+        "commenter_id": row["commenter_id"],
+        "target_id": row["target_id"],
+        "comment": row["content"],
         "links": pics,
         "sub_comments": [],      # 先留空，后面你要的话可以做子评论表
         "emoji_comments": {},    # 同理
@@ -316,21 +214,11 @@ def _serialize_comment(row: Dict[str, Any], conn) -> Dict[str, Any]:
     }
 
 
-def _serialize_user(user: User) -> Dict[str, Any]:
+def _serialize_user(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
-<<<<<<< Updated upstream
-        "user_id": user.id,
-        "name": user.name,
-        "avatar_url": user.avatar_url,
-        "signature": user.signature,
-=======
         "user_id": row["id"],
         "name": row.get("name"),
         "avatar": row.get("avatar_base64"),
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     }
 
 
@@ -349,10 +237,6 @@ def validate_login():
     if not name or not password:
         return jsonify({"error": "用户名和密码不能为空"}), 400
 
-<<<<<<< Updated upstream
-    user = User.query.filter_by(name=name).first()
-    if not user or user.password != password:
-=======
     conn = get_db_connection()
     try:
         cur = conn.cursor()
@@ -382,25 +266,14 @@ def validate_login():
         conn.close()
 
     if not row or row["password"] != password:
->>>>>>> Stashed changes
         return jsonify({"ok": False, "error": "用户名或密码错误"}), 401
 
     return jsonify({
         "ok": True,
         "user": {
-<<<<<<< Updated upstream
-            "user_id": user.id,
-            "name": user.name,
-            "avatar_url": user.avatar_url,
-            "signature": user.signature,
-=======
             "user_id": row["id"],
             "name": row["name"],
             "avatar": row.get("avatar_base64"),
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
         }
     })
 
@@ -410,17 +283,6 @@ def get_user_profile(user_id: int):
     """
     请求：个人信息；返回：用户名，用户头像。（前端可缓存）
     """
-<<<<<<< Updated upstream
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({"error": "用户不存在"}), 404
-
-    return jsonify({
-        "user_id": user.id,
-        "name": user.name,
-        "avatar_url": user.avatar_url,
-        "signature": user.signature,
-=======
     conn = get_db_connection()
     try:
         cur = conn.cursor()
@@ -456,48 +318,59 @@ def get_user_profile(user_id: int):
         "user_id": row["id"],
         "name": row["name"],
         "avatar": row.get("avatar_base64"),
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     })
 
 
 # ========== 消息相关：系统 / 用户 / 全部 / 标记已读 ==========
 
-def _fetch_messages_for_user(user_id: int, system_only: bool | None):
-    query = (
-        db.session.query(UserMessage, Message)
-        .join(Message, UserMessage.message_id == Message.id)
-        .filter(UserMessage.user_id == user_id)
-    )
+def _fetch_messages_for_user(user_id: int, conn, system_only: bool | None):
+    sql = """
+        SELECT id, sender_id, receiver_id, text, created_at, read, system,
+               memory_id, picture_id, comment_id
+        FROM messages
+        WHERE receiver_id = %s
+    """
+    params = [user_id]
     if system_only is True:
-        query = query.filter(Message.system.is_(True))
+        sql += " AND system = TRUE"
     elif system_only is False:
-        query = query.filter(Message.system.is_(False))
+        sql += " AND system = FALSE"
 
-    query = query.order_by(Message.created_at.desc())
-    return query.all()
+    sql += " ORDER BY created_at DESC"
+
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    rows = cur.fetchall()
+    cur.close()
+    return rows
 
 
 @memory_bp.route("/user/<int:user_id>/messages/system", methods=["GET"])
 def get_system_messages(user_id: int):
     """请求：系统消息；返回：来自系统的消息"""
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    rows = _fetch_messages_for_user(user_id, system_only=True)
-    return jsonify([_serialize_message(msg, user_id, um.is_read) for um, msg in rows])
+        rows = _fetch_messages_for_user(user_id, conn, system_only=True)
+        return jsonify([_serialize_message(r) for r in rows])
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/user/<int:user_id>/messages/user", methods=["GET"])
 def get_user_messages(user_id: int):
     """请求：用户消息；返回：来自其他用户的消息"""
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    rows = _fetch_messages_for_user(user_id, system_only=False)
-    return jsonify([_serialize_message(msg, user_id, um.is_read) for um, msg in rows])
+        rows = _fetch_messages_for_user(user_id, conn, system_only=False)
+        return jsonify([_serialize_message(r) for r in rows])
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/user/<int:user_id>/messages", methods=["GET"])
@@ -506,11 +379,15 @@ def get_all_messages(user_id: int):
     请求：获取消息；
     返回：消息id，发送者id，消息内容，消息时间，消息已读状态。
     """
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    rows = _fetch_messages_for_user(user_id, system_only=None)
-    return jsonify([_serialize_message(msg, user_id, um.is_read) for um, msg in rows])
+        rows = _fetch_messages_for_user(user_id, conn, system_only=None)
+        return jsonify([_serialize_message(r) for r in rows])
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/user/<int:user_id>/messages/<int:msg_id>/read", methods=["POST"])
@@ -518,16 +395,28 @@ def mark_message_read(user_id: int, msg_id: int):
     """
     请求：标记已读；推送：将指定id的消息标为已读。
     """
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    link = UserMessage.query.filter_by(user_id=user_id, message_id=msg_id).first()
-    if not link:
-        return jsonify({"error": "消息不存在或不属于该用户"}), 404
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE messages SET read = TRUE WHERE id = %s AND receiver_id = %s "
+            "RETURNING id;",
+            (msg_id, user_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            cur.close()
+            return jsonify({"error": "消息不存在或不属于该用户"}), 404
 
-    link.is_read = True
-    db.session.commit()
-    return jsonify({"ok": True, "message_id": msg_id})
+        conn.commit()
+        cur.close()
+        return jsonify({"ok": True, "message_id": msg_id})
+    finally:
+        conn.close()
 
 
 # ========== 回忆：预览 / 获取 / 限定人员 / 包含人员 / 新建 / 往年今日 ==========
@@ -538,59 +427,20 @@ def preview_memory(memory_id: int):
     请求：预览回忆；
     返回：标题 + 封面图 + 日期 + 地点
     """
-    memory = Memory.query.get(memory_id)
-    if not memory:
-        return jsonify({"error": "回忆不存在"}), 404
-
-    return jsonify(_serialize_memory(memory))
-
-
-@memory_bp.route("/memory/<int:memory_id>/pictures", methods=["GET"])
-def get_memory_pictures(memory_id: int):
-    """
-    请求：获取回忆的所有图片（base64）。
-    返回：包含 image_base64 的图片列表。
-    """
     conn = get_db_connection()
     try:
-        if not _memory_exists(memory_id, conn):
-            return jsonify({"error": "回忆不存在"}), 404
-
         cur = conn.cursor()
         cur.execute(
-            """
-            SELECT id, memory_id, pict, title
-            FROM pictures
-            WHERE memory_id = %s
-            ORDER BY id ASC
-            """,
+            "SELECT id, title, location, creator_id, created_at "
+            "FROM memories WHERE id = %s",
             (memory_id,),
-        )
-        rows = cur.fetchall()
-        cur.close()
-        return jsonify([_serialize_picture(r) for r in rows])
-    finally:
-        conn.close()
-
-
-@memory_bp.route("/pictures/<int:picture_id>", methods=["GET"])
-def get_picture_by_id(picture_id: int):
-    """
-    请求：通过图片 id 获取图片（base64）。
-    """
-    conn = get_db_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id, memory_id, pict, title FROM pictures WHERE id = %s",
-            (picture_id,),
         )
         row = cur.fetchone()
         cur.close()
         if not row:
-            return jsonify({"error": "图片不存在"}), 404
+            return jsonify({"error": "回忆不存在"}), 404
 
-        return jsonify(_serialize_picture(row))
+        return jsonify(_serialize_memory(row, conn))
     finally:
         conn.close()
 
@@ -659,20 +509,29 @@ def get_memories(user_id: int):
     limit = r - l + 1
     offset = l - 1
 
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    memories = (
-        Memory.query.outerjoin(UserMemory)
-        .filter(or_(Memory.creator_id == user_id, UserMemory.user_id == user_id))
-        .distinct()
-        .order_by(Memory.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-        .all()
-    )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT m.id, m.title, m.location, m.creator_id, m.created_at
+            FROM memories m
+            LEFT JOIN memory_visible_users mv ON mv.memory_id = m.id
+            WHERE m.creator_id = %s OR mv.user_id = %s
+            ORDER BY m.created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            (user_id, user_id, limit, offset),
+        )
+        rows = cur.fetchall()
+        cur.close()
 
-    return jsonify([_serialize_memory(m) for m in memories])
+        return jsonify([_serialize_memory(row, conn) for row in rows])
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/user/<int:user_id>/memories/only-users", methods=["GET"])
@@ -690,25 +549,36 @@ def get_memories_only_users(user_id: int):
 
     target_ids = sorted({int(x) for x in ids_str.split(",") if x.strip()})
 
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    rows = (
-        Memory.query.outerjoin(UserMemory)
-        .filter(or_(Memory.creator_id == user_id, UserMemory.user_id == user_id))
-        .distinct()
-        .all()
-    )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT m.id, m.title, m.location, m.creator_id, m.created_at
+            FROM memories m
+            LEFT JOIN memory_visible_users mv ON mv.memory_id = m.id
+            WHERE m.creator_id = %s OR mv.user_id = %s
+            """,
+            (user_id, user_id),
+        )
+        rows = cur.fetchall()
+        cur.close()
 
-    filtered = []
-    for memory in rows:
-        vis_ids = sorted(set(_fetch_visible_user_ids(memory.id)))
-        if vis_ids == target_ids:
-            filtered.append(_serialize_memory(memory))
+        filtered = []
+        for row in rows:
+            vis_ids = sorted(set(_fetch_visible_user_ids(row["id"], conn)))
+            if vis_ids == target_ids:
+                filtered.append(_serialize_memory(row, conn))
 
-    filtered.sort(key=lambda m: m["created_at"] or "", reverse=True)
-    page = paginate_sorted(filtered, l, r)
-    return jsonify(page)
+        # 按 created_at 再排序一下
+        filtered.sort(key=lambda m: m["created_at"] or "", reverse=True)
+        page = paginate_sorted(filtered, l, r)
+        return jsonify(page)
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/user/<int:user_id>/memories/include-users", methods=["GET"])
@@ -726,25 +596,35 @@ def get_memories_include_users(user_id: int):
 
     target_set = {int(x) for x in ids_str.split(",") if x.strip()}
 
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    rows = (
-        Memory.query.outerjoin(UserMemory)
-        .filter(or_(Memory.creator_id == user_id, UserMemory.user_id == user_id))
-        .distinct()
-        .all()
-    )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT m.id, m.title, m.location, m.creator_id, m.created_at
+            FROM memories m
+            LEFT JOIN memory_visible_users mv ON mv.memory_id = m.id
+            WHERE m.creator_id = %s OR mv.user_id = %s
+            """,
+            (user_id, user_id),
+        )
+        rows = cur.fetchall()
+        cur.close()
 
-    filtered = []
-    for memory in rows:
-        vis_set = set(_fetch_visible_user_ids(memory.id))
-        if target_set.issubset(vis_set) and vis_set != target_set:
-            filtered.append(_serialize_memory(memory))
+        filtered = []
+        for row in rows:
+            vis_set = set(_fetch_visible_user_ids(row["id"], conn))
+            if target_set.issubset(vis_set) and vis_set != target_set:
+                filtered.append(_serialize_memory(row, conn))
 
-    filtered.sort(key=lambda m: m["created_at"] or "", reverse=True)
-    page = paginate_sorted(filtered, l, r)
-    return jsonify(page)
+        filtered.sort(key=lambda m: m["created_at"] or "", reverse=True)
+        page = paginate_sorted(filtered, l, r)
+        return jsonify(page)
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/user/<int:user_id>/memories", methods=["POST"])
@@ -781,37 +661,69 @@ def create_memory(user_id: int):
         except Exception:
             pass
 
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
-
+    conn = get_db_connection()
     try:
-        memory = Memory(
-            title=title,
-            location=location,
-            creator_id=user_id,
-            created_at=created_at or datetime.now(),
-        )
-        db.session.add(memory)
-        db.session.flush()
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
+        cur = conn.cursor()
+
+        # 插入 memories
+        if created_at is None:
+            cur.execute(
+                """
+                INSERT INTO memories (title, location, creator_id)
+                VALUES (%s, %s, %s)
+                RETURNING id, title, location, creator_id, created_at
+                """,
+                (title, location, user_id),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO memories (title, location, creator_id, created_at)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id, title, location, creator_id, created_at
+                """,
+                (title, location, user_id, created_at),
+            )
+        mem_row = cur.fetchone()
+
+        mem_id = mem_row["id"]
+
+        # 插入可见用户（确保自己也在里面）
         if user_id not in visible_ids:
             visible_ids.append(user_id)
 
         for uid in set(visible_ids):
-            db.session.add(
-                UserMemory(user_id=uid, memory_id=memory.id)
+            cur.execute(
+                """
+                INSERT INTO memory_visible_users (memory_id, user_id)
+                VALUES (%s, %s)
+                ON CONFLICT (memory_id, user_id) DO NOTHING
+                """,
+                (mem_id, uid),
             )
 
+        # 插入图片
         for p in pictures:
-            db.session.add(
-                Picture(memory_id=memory.id, pict=p, title=title)
+            cur.execute(
+                """
+                INSERT INTO pictures (memory_id, pict, title)
+                VALUES (%s, %s, %s)
+                """,
+                (mem_id, p, title),
             )
 
-        db.session.commit()
-        return jsonify(_serialize_memory(memory)), 201
+        conn.commit()
+        cur.close()
+
+        return jsonify(_serialize_memory(mem_row, conn)), 201
     except Exception as e:
-        db.session.rollback()
+        conn.rollback()
         return jsonify({"error": f"创建回忆失败: {str(e)}"}), 500
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/user/<int:user_id>/memories/on-this-day", methods=["GET"])
@@ -822,31 +734,41 @@ def memories_on_this_day(user_id: int):
     """
     today = datetime.now().date()
 
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    rows = (
-        Memory.query.outerjoin(UserMemory)
-        .filter(or_(Memory.creator_id == user_id, UserMemory.user_id == user_id))
-        .distinct()
-        .all()
-    )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT m.id, m.title, m.location, m.creator_id, m.created_at
+            FROM memories m
+            LEFT JOIN memory_visible_users mv ON mv.memory_id = m.id
+            WHERE m.creator_id = %s OR mv.user_id = %s
+            """,
+            (user_id, user_id),
+        )
+        rows = cur.fetchall()
+        cur.close()
 
-    previews = []
-    for memory in rows:
-        created = memory.created_at
-        if not isinstance(created, datetime):
-            continue
-        d = created.date()
-        if d.month == today.month and d.day == today.day and d.year < today.year:
-            previews.append(_serialize_memory(memory)["preview"])
+        previews = []
+        for row in rows:
+            created = row["created_at"]
+            if not isinstance(created, datetime):
+                continue
+            d = created.date()
+            if d.month == today.month and d.day == today.day and d.year < today.year:
+                previews.append(_serialize_memory(row, conn)["preview"])
 
-    previews.sort(key=lambda p: p["date"] or "", reverse=True)
+        previews.sort(key=lambda p: p["date"] or "", reverse=True)
 
-    if not previews:
-        return jsonify(None)
+        if not previews:
+            return jsonify(None)
 
-    return jsonify(previews)
+        return jsonify(previews)
+    finally:
+        conn.close()
 
 
 # ========== 收藏：添加 / 获取 ==========
@@ -862,29 +784,39 @@ def add_favorite(user_id: int):
     if memory_id is None:
         return jsonify({"error": "缺少 memory_id"}), 400
 
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
-    if not _memory_exists(memory_id):
-        return jsonify({"error": "回忆不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
+        if not _memory_exists(memory_id, conn):
+            return jsonify({"error": "回忆不存在"}), 404
 
-    link = UserMemory.query.filter_by(user_id=user_id, memory_id=memory_id).first()
-    if link is None:
-        link = UserMemory(user_id=user_id, memory_id=memory_id, is_favorite=True)
-        db.session.add(link)
-    else:
-        link.is_favorite = True
-    db.session.commit()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO favorites (user_id, memory_id)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id, memory_id) DO NOTHING
+            """,
+            (user_id, memory_id),
+        )
 
-    favorites = (
-        UserMemory.query.filter_by(user_id=user_id, is_favorite=True)
-        .order_by(UserMemory.joined_at.desc())
-        .all()
-    )
+        conn.commit()
 
-    return jsonify({
-        "ok": True,
-        "favorites": [f.memory_id for f in favorites],
-    })
+        # 返回当前收藏列表的 memory_id
+        cur.execute(
+            "SELECT memory_id FROM favorites WHERE user_id = %s ORDER BY created_at DESC",
+            (user_id,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+
+        return jsonify({
+            "ok": True,
+            "favorites": [r["memory_id"] for r in rows],
+        })
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/user/<int:user_id>/favorites", methods=["GET"])
@@ -901,19 +833,29 @@ def get_favorites(user_id: int):
     limit = r - l + 1
     offset = l - 1
 
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    memories = (
-        Memory.query.join(UserMemory, UserMemory.memory_id == Memory.id)
-        .filter(UserMemory.user_id == user_id, UserMemory.is_favorite.is_(True))
-        .order_by(Memory.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-        .all()
-    )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT m.id, m.title, m.location, m.creator_id, m.created_at
+            FROM favorites f
+            JOIN memories m ON f.memory_id = m.id
+            WHERE f.user_id = %s
+            ORDER BY m.created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            (user_id, limit, offset),
+        )
+        rows = cur.fetchall()
+        cur.close()
 
-    return jsonify([_serialize_memory(m) for m in memories])
+        return jsonify([_serialize_memory(row, conn) for row in rows])
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/user/<int:user_id>/collections", methods=["GET"])
@@ -930,19 +872,29 @@ def get_collections(user_id: int):
     limit = r - l + 1
     offset = l - 1
 
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-    memories = (
-        Memory.query.join(UserMemory, UserMemory.memory_id == Memory.id)
-        .filter(UserMemory.user_id == user_id, UserMemory.is_favorite.is_(True))
-        .order_by(UserMemory.joined_at.desc())
-        .limit(limit)
-        .offset(offset)
-        .all()
-    )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT m.id, m.title, m.location, m.creator_id, m.created_at
+            FROM favorites f
+            JOIN memories m ON f.memory_id = m.id
+            WHERE f.user_id = %s
+            ORDER BY f.created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            (user_id, limit, offset),
+        )
+        rows = cur.fetchall()
+        cur.close()
 
-    return jsonify([_serialize_memory(m) for m in memories])
+        return jsonify([_serialize_memory(row, conn) for row in rows])
+    finally:
+        conn.close()
 
 
 # ========== 人员列表（用于前端 persons 路由） ==========
@@ -961,19 +913,11 @@ def get_persons(user_id: int):
     limit = r - l + 1
     offset = l - 1
 
-    if not _user_exists(user_id):
-        return jsonify({"error": "用户不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _user_exists(user_id, conn):
+            return jsonify({"error": "用户不存在"}), 404
 
-<<<<<<< Updated upstream
-    users = (
-        User.query.filter(User.id != user_id)
-        .order_by(User.id.asc())
-        .limit(limit)
-        .offset(offset)
-        .all()
-    )
-    return jsonify([_serialize_user(u) for u in users])
-=======
         cur = conn.cursor()
         try:
             cur.execute(
@@ -1004,7 +948,6 @@ def get_persons(user_id: int):
         return jsonify([_serialize_user(r) for r in rows])
     finally:
         conn.close()
->>>>>>> Stashed changes
 
 
 # ========== 评论：添加 / 获取 ==========
@@ -1031,33 +974,52 @@ def add_comment_to_memory(memory_id: int):
     if not content:
         return jsonify({"error": "评论内容不能为空"}), 400
 
-    if not _memory_exists(memory_id):
-        return jsonify({"error": "回忆不存在"}), 404
-    if not _user_exists(commenter_id):
-        return jsonify({"error": "评论用户不存在"}), 404
-
+    conn = get_db_connection()
     try:
-        comment = Comment(
-            memory_id=memory_id,
-            commenter_id=commenter_id,
-            target_id=target_id,
-            content=content,
+        if not _memory_exists(memory_id, conn):
+            return jsonify({"error": "回忆不存在"}), 404
+        if not _user_exists(commenter_id, conn):
+            return jsonify({"error": "评论用户不存在"}), 404
+
+        cur = conn.cursor()
+
+        # 插入评论
+        cur.execute(
+            """
+            INSERT INTO comments (memory_id, commenter_id, target_id, content)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, memory_id, commenter_id, target_id, content, created_at
+            """,
+            (memory_id, commenter_id, target_id, content),
         )
-        if picture_ids:
-            pics = (
-                Picture.query.filter(Picture.id.in_(picture_ids))
-                .filter(Picture.memory_id == memory_id)
-                .all()
+        row = cur.fetchone()
+        comment_id = row["id"]
+
+        # picture_ids 只允许属于该 memory 的图片
+        for pid in picture_ids:
+            cur.execute(
+                "SELECT 1 FROM pictures WHERE id = %s AND memory_id = %s",
+                (pid, memory_id),
             )
-            comment.pictures = pics
+            if cur.fetchone():
+                cur.execute(
+                    """
+                    INSERT INTO comment_picture_links (comment_id, picture_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (comment_id, pid),
+                )
 
-        db.session.add(comment)
-        db.session.commit()
+        conn.commit()
+        cur.close()
 
-        return jsonify(_serialize_comment(comment)), 201
+        return jsonify(_serialize_comment(row, conn)), 201
     except Exception as e:
-        db.session.rollback()
+        conn.rollback()
         return jsonify({"error": f"添加评论失败: {str(e)}"}), 500
+    finally:
+        conn.close()
 
 
 @memory_bp.route("/memory/<int:memory_id>/comments", methods=["GET"])
@@ -1074,18 +1036,28 @@ def get_comments(memory_id: int):
     limit = r - l + 1
     offset = l - 1
 
-    if not _memory_exists(memory_id):
-        return jsonify({"error": "回忆不存在"}), 404
+    conn = get_db_connection()
+    try:
+        if not _memory_exists(memory_id, conn):
+            return jsonify({"error": "回忆不存在"}), 404
 
-    comments = (
-        Comment.query.filter_by(memory_id=memory_id)
-        .order_by(Comment.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-        .all()
-    )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, memory_id, commenter_id, target_id, content, created_at
+            FROM comments
+            WHERE memory_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            (memory_id, limit, offset),
+        )
+        rows = cur.fetchall()
+        cur.close()
 
-    return jsonify([_serialize_comment(c) for c in comments])
+        return jsonify([_serialize_comment(row, conn) for row in rows])
+    finally:
+        conn.close()
 
 
 # ========== Debug: pg-test（你之前的） ==========
@@ -1097,34 +1069,52 @@ def pg_test():
     用来确认数据库连通 + 能读写。
     """
     try:
-        db.create_all()
-        ping = DebugPing(message="hello from memory backend")
-        db.session.add(ping)
-        db.session.commit()
+        conn = get_db_connection()
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "step": "connect",
+            "error": str(e),
+        }), 500
 
-        rows = (
-            DebugPing.query.order_by(DebugPing.created_at.desc())
-            .limit(5)
-            .all()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS debug_ping (
+            id          SERIAL PRIMARY KEY,
+            message     TEXT NOT NULL,
+            created_at  TIMESTAMP NOT NULL DEFAULT NOW()
         )
+        """)
+        cur.execute(
+            "INSERT INTO debug_ping (message) VALUES (%s) RETURNING id, created_at;",
+            ("hello from memory backend",),
+        )
+        inserted = cur.fetchone()
+
+        cur.execute(
+            """
+            SELECT id, message, created_at
+            FROM debug_ping
+            ORDER BY created_at DESC
+            LIMIT 5
+            """
+        )
+        rows = cur.fetchall()
+
+        conn.commit()
+        cur.close()
+        conn.close()
 
         return jsonify({
             "ok": True,
-            "inserted": {
-                "id": ping.id,
-                "created_at": ping.created_at,
-            },
-            "recent_rows": [
-                {
-                    "id": r.id,
-                    "message": r.message,
-                    "created_at": r.created_at,
-                }
-                for r in rows
-            ],
+            "inserted": inserted,
+            "recent_rows": rows,
         })
     except Exception as e:
-        db.session.rollback()
+        conn.rollback()
+        cur.close()
+        conn.close()
         return jsonify({
             "ok": False,
             "step": "query",
@@ -1140,31 +1130,22 @@ def init_demo_data():
     初始化几条用户 / 回忆 / 图片 / 消息 / 收藏数据，方便你测试。
     如果 users 表不为空，则不会重复创建。
     """
+    conn = get_db_connection()
     try:
-        if User.query.count() > 0:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS c FROM users")
+        count = cur.fetchone()["c"]
+        if count > 0:
+            cur.close()
+            conn.close()
             return jsonify({
                 "ok": True,
                 "skip": True,
                 "reason": "users 表已经有数据了，不重复初始化",
             })
 
+        # 1. 创建用户
         users_info = [
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-            ("Alice", "/avatar/alice.png", "alice123", "向海而行"),
-            ("Bob", "/avatar/bob.png", "bob123", "今天也要努力"),
-            ("Carol", "/avatar/carol.png", "carol123", "记录生活的小确幸"),
-        ]
-        user_ids: Dict[str, int] = {}
-        for name, avatar, pwd, signature in users_info:
-            user = User(
-                name=name,
-                avatar_url=avatar,
-                password=pwd,
-                signature=signature,
-=======
-=======
->>>>>>> Stashed changes
             ("Alice", "alice123"),
             ("Bob", "bob123"),
             ("Carol", "carol123"),
@@ -1178,39 +1159,9 @@ def init_demo_data():
                 RETURNING id
                 """,
                 (name, pwd),
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
             )
-            db.session.add(user)
-            db.session.flush()
-            user_ids[name] = user.id
-
-<<<<<<< Updated upstream
-=======
-        # 1.1 add base64 avatars for demo users；如果没有 avatars 表则跳过
-        try:
-            avatar_files = {
-                "Alice": "mowan.png",
-                "Bob": "modi.jpg",
-                "Carol": "mowan.png",
-            }
-            for name, filename in avatar_files.items():
-                avatar_b64 = _load_avatar_file_base64(filename)
-                if avatar_b64:
-                    cur.execute(
-                        """
-                        INSERT INTO avatars (user_id, filename, image_base64)
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT (user_id) DO UPDATE
-                        SET filename = EXCLUDED.filename,
-                            image_base64 = EXCLUDED.image_base64
-                        """,
-                        (user_ids[name], filename, avatar_b64),
-                    )
-        except Exception:
-            pass
+            uid = cur.fetchone()["id"]
+            user_ids[name] = uid
 
         # 1.1 add base64 avatars for demo users；如果没有 avatars 表则跳过
         try:
@@ -1236,78 +1187,122 @@ def init_demo_data():
             pass
 
         # 2. 创建两条回忆
->>>>>>> Stashed changes
         today = datetime.now().date()
         mem1_date = datetime(today.year - 1, today.month, today.day)
         mem2_date = datetime(today.year - 1, today.month, max(1, today.day - 1))
 
-        mem1 = Memory(
-            title="海边散步",
-            location="东京湾",
-            creator_id=user_ids["Alice"],
-            created_at=mem1_date,
+        # 海边散步
+        cur.execute(
+            """
+            INSERT INTO memories (title, location, creator_id, created_at)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, title, location, creator_id, created_at
+            """,
+            ("海边散步", "东京湾", user_ids["Alice"], mem1_date),
         )
-        mem2 = Memory(
-            title="图书馆复习",
-            location="校园图书馆",
-            creator_id=user_ids["Bob"],
-            created_at=mem2_date,
+        mem1 = cur.fetchone()
+
+        # 图书馆复习
+        cur.execute(
+            """
+            INSERT INTO memories (title, location, creator_id, created_at)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, title, location, creator_id, created_at
+            """,
+            ("图书馆复习", "校园图书馆", user_ids["Bob"], mem2_date),
         )
-        db.session.add_all([mem1, mem2])
-        db.session.flush()
+        mem2 = cur.fetchone()
 
-        def ensure_user_memory(uid: int, mem_id: int, favorite: bool = False):
-            link = UserMemory.query.filter_by(user_id=uid, memory_id=mem_id).first()
-            if link is None:
-                link = UserMemory(user_id=uid, memory_id=mem_id, is_favorite=favorite)
-                db.session.add(link)
-            elif favorite:
-                link.is_favorite = True
+        # 3. 可见人员
+        # 海边散步：Alice, Bob
+        cur.execute(
+            "INSERT INTO memory_visible_users (memory_id, user_id) VALUES (%s, %s)",
+            (mem1["id"], user_ids["Alice"]),
+        )
+        cur.execute(
+            "INSERT INTO memory_visible_users (memory_id, user_id) VALUES (%s, %s)",
+            (mem1["id"], user_ids["Bob"]),
+        )
 
-        ensure_user_memory(user_ids["Alice"], mem1.id)
-        ensure_user_memory(user_ids["Bob"], mem1.id)
+        # 图书馆复习：Alice, Bob, Carol
         for u in ["Alice", "Bob", "Carol"]:
-            ensure_user_memory(user_ids[u], mem2.id)
+            cur.execute(
+                "INSERT INTO memory_visible_users (memory_id, user_id) VALUES (%s, %s)",
+                (mem2["id"], user_ids[u]),
+            )
 
+        # 4. 图片
         for pict in ["/pics/m1_p1.png", "/pics/m1_p2.png"]:
-            db.session.add(Picture(memory_id=mem1.id, pict=pict, title=mem1.title))
-        db.session.add(Picture(memory_id=mem2.id, pict="/pics/m2_p1.png", title=mem2.title))
+            cur.execute(
+                "INSERT INTO pictures (memory_id, pict, title) VALUES (%s, %s, %s)",
+                (mem1["id"], pict, mem1["title"]),
+            )
 
-        msg1 = Message(
-            sender_id=None,
-            text="系统：Bob 邀请你加入回忆《海边散步》",
-            system=True,
-            memory_id=mem1.id,
+        cur.execute(
+            "INSERT INTO pictures (memory_id, pict, title) VALUES (%s, %s, %s)",
+            (mem2["id"], "/pics/m2_p1.png", mem2["title"]),
         )
-        msg2 = Message(
-            sender_id=user_ids["Bob"],
-            text="周末一起去看海吗？",
-            system=False,
+
+        # 5. 消息（1 条系统 + 1 条普通）
+        cur.execute(
+            """
+            INSERT INTO messages (sender_id, receiver_id, text, system, memory_id)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                None,
+                user_ids["Alice"],
+                "系统：Bob 邀请你加入回忆《海边散步》",
+                True,
+                mem1["id"],
+            ),
         )
-        db.session.add_all([msg1, msg2])
-        db.session.flush()
 
-        db.session.add(UserMessage(user_id=user_ids["Alice"], message_id=msg1.id))
-        db.session.add(UserMessage(user_id=user_ids["Alice"], message_id=msg2.id))
+        cur.execute(
+            """
+            INSERT INTO messages (sender_id, receiver_id, text, system)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                user_ids["Bob"],
+                user_ids["Alice"],
+                "周末一起去看海吗？",
+                False,
+            ),
+        )
 
-        ensure_user_memory(user_ids["Alice"], mem1.id, favorite=True)
-        ensure_user_memory(user_ids["Alice"], mem2.id, favorite=True)
-        ensure_user_memory(user_ids["Bob"], mem1.id, favorite=True)
+        # 6. 收藏示例：Alice 收藏 mem1、mem2；Bob 收藏 mem1
+        cur.execute(
+            "INSERT INTO favorites (user_id, memory_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (user_ids["Alice"], mem1["id"]),
+        )
+        cur.execute(
+            "INSERT INTO favorites (user_id, memory_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (user_ids["Alice"], mem2["id"]),
+        )
+        cur.execute(
+            "INSERT INTO favorites (user_id, memory_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (user_ids["Bob"], mem1["id"]),
+        )
 
-        db.session.commit()
+        conn.commit()
+        cur.close()
+        conn.close()
 
         return jsonify({
             "ok": True,
             "created_users": user_ids,
             "created_memories": {
-                "mem1_id": mem1.id,
-                "mem2_id": mem2.id,
+                "mem1_id": mem1["id"],
+                "mem2_id": mem2["id"],
             },
             "created_favorites": {
-                "Alice": [mem1.id, mem2.id],
-                "Bob": [mem1.id],
+                "Alice": [mem1["id"], mem2["id"]],
+                "Bob": [mem1["id"]],
             },
         }), 201
     except Exception as e:
-        db.session.rollback()
+        conn.rollback()
+        cur.close()
+        conn.close()
         return jsonify({"ok": False, "error": str(e)}), 500
