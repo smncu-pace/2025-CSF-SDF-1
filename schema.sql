@@ -1,9 +1,20 @@
 CREATE TABLE IF NOT EXISTS users (
     id          SERIAL PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
+<<<<<<< Updated upstream
     avatar      TEXT,
     password    TEXT NOT NULL,
     signature   TEXT NOT NULL DEFAULT ''
+=======
+    password    TEXT NOT NULL
+>>>>>>> Stashed changes
+);
+
+-- Store avatar images as base64 (one row per user)
+CREATE TABLE IF NOT EXISTS avatars (
+    user_id      INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    filename     TEXT,
+    image_base64 TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS memories (
