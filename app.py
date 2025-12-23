@@ -7,12 +7,14 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 from config import Config
+from models import db
 from routes.memory_routes import memory_bp
 
 
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    db.init_app(app)
 
     # CORS
     CORS(app, resources={r"/api/*": {"origins": "*"}})

@@ -2,7 +2,8 @@ CREATE TABLE IF NOT EXISTS users (
     id          SERIAL PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
     avatar      TEXT,
-    password    TEXT NOT NULL
+    password    TEXT NOT NULL,
+    signature   TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS memories (
