@@ -5,6 +5,7 @@ from typing import Iterable, List, Optional
 
 from models import db, Memory, User
 from models.models import user_memory
+from sqlalchemy import select
 
 # 转化成datetime 格式
 def _parse_time(value) -> Optional[datetime]:
@@ -132,3 +133,80 @@ def query_memories_on_this_day(user_id: int, time_value) -> List[dict]:
 
     matched.sort(key=lambda m: m.start_time or datetime.min)
     return [_serialize_memory_preview(m) for m in matched]
+
+
+def create_memory(
+    user_id: int,
+    title: str,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    location: str | None = None,
+    description: str | None = None,
+    cover_url: str | None = None,
+) -> int:
+    """
+    新建回忆并绑定用户。
+    time_range: [start_time, end_time]，支持 datetime 或 ISO8601 字符串
+    """
+    if not user_id or not title:
+        raise ValueError("user_id and title are required")
+
+    user = User.query.get(user_id)
+    if user is None:
+        raise ValueError("user not found")
+
+    memory = Memory(
+        title=title,
+        location=location,
+        description=description,
+        start_time=start_time,
+        end_time=end_time,
+        creator_id=user_id,
+        cover_url=cover_url,
+    )
+    db.session.add(memory)
+    db.session.flush()
+
+    db.session.execute(
+        user_memory.insert().values(
+            user_id=user_id,
+            memory_id=memory.id,
+            role="Supervisor",
+        )
+    )
+
+    db.session.commit()
+    return memory.id
+
+
+def delete_memory(memory_id: int, user_id: int) -> Optional[dict]:
+    """
+    删除回忆：仅当 user_id 是该回忆的 Supervisor 才允许删除。
+    成功返回 None；失败返回 {"message": "删除失败"}。
+    """
+    if not memory_id or not user_id:
+        return None
+
+    memory = Memory.query.get(memory_id)
+    if memory is None:
+        return "没有找到相应的回忆"
+
+    role = db.session.execute(
+        select(user_memory.c.role).where(
+            user_memory.c.user_id == user_id,
+            user_memory.c.memory_id == memory_id,
+        )
+    ).scalar()
+
+    if role != "Supervisor":
+        return "您不是这条回忆的超级管理员，无法删除。请联系超级管理员进行删除。"
+    try:
+        db.session.execute(
+            user_memory.delete().where(user_memory.c.memory_id == memory_id)
+        )
+        db.session.delete(memory)
+        db.session.commit()
+        return "成功删除"
+    except Exception:
+        db.session.rollback()
+        return "删除失败"
