@@ -33,11 +33,12 @@ def authenticate(name: str, password: str) -> Optional[Dict]:
     return _user_to_dict(user)
 
 
+## 根据ID索引，注意这里只回传头像URL，在路由层才会提取base 64
 def get_user(user_id: int) -> Optional[Dict]:
     user = User.query.get(user_id)
     return _user_to_dict(user) if user else None
 
-
+## 根据姓名索引
 def get_user_by_name(name: str) -> Optional[Dict]:
     user = User.query.filter_by(name=name).first()
     return _user_to_dict(user) if user else None

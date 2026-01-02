@@ -9,7 +9,7 @@ user_memory = db.Table(
     db.Column("user_id", db.Integer, db.ForeignKey("user.id"), primary_key=True),
     db.Column("memory_id", db.Integer, db.ForeignKey("memory.id"), primary_key=True),
     db.Column("joined_at", db.DateTime, nullable=False, default=db.func.now()),
-    db.Column("role", db.String(32), nullable=False, default="user"),
+    db.Column("role", db.String(32), nullable=False, default="user"),         # “Owner" / "monitor" / "user"
     db.Column("is_favorite", db.Boolean, nullable=False, default=False),
 )
 
@@ -76,6 +76,10 @@ class Memory(db.Model):
 class Picture(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     image_url = db.Column(db.String(255))
+    title = db.Column(db.String(255))
+    description = db.Column(db.Text)
+    creator_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    time = db.Column(db.DateTime, nullable=False, default=db.func.now())
     memory_id = db.Column(db.Integer, db.ForeignKey("memory.id"))
 
     memory = db.relationship("Memory", back_populates="pictures")
@@ -103,6 +107,10 @@ class Comment(db.Model):
 class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     text = db.Column(db.String(255))
+    type = db.Column(db.String(32), nullable=False, default="null") # "comment" / "picture" / "memory"
+    link_id = db.Column(db.Integer)
+    time = db.Column(db.DateTime, nullable=False, default=db.func.now())
+    title = db.Column(db.String(255))
 
     users = db.relationship(
         "User",

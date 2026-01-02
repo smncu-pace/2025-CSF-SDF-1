@@ -10,6 +10,7 @@ from flask_cors import CORS
 from config import Config
 from models import db
 from routes.memory_routes import memory_bp
+from routes.user_routes import user_bp
 
 
 def create_app(config_class=Config):
@@ -22,6 +23,7 @@ def create_app(config_class=Config):
 
     # 注册蓝图
     app.register_blueprint(memory_bp, url_prefix="/api")
+    app.register_blueprint(user_bp, url_prefix="/api")
 
     @app.route("/")
     def index():
